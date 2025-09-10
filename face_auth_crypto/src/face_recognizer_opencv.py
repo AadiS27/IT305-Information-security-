@@ -11,7 +11,7 @@ from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.neural_network import MLPClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.metrics import accuracy_score, classification_report
+from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.preprocessing import LabelEncoder
 import cv2
 
@@ -34,6 +34,29 @@ class FaceRecognizer:
         self.rf_model = None
         self.nn_model = None
         
+        # Model accuracy metrics for presentation
+        self.svm_accuracy = 0.0
+        self.rf_accuracy = 0.0
+        self.nn_accuracy = 0.0
+        self.svm_cv_accuracy = 0.0
+        self.rf_cv_accuracy = 0.0
+        self.nn_cv_accuracy = 0.0
+        self.svm_cv_std = 0.0
+        self.rf_cv_std = 0.0
+        self.nn_cv_std = 0.0
+        
+        # Initialize confusion matrix storage
+        self.svm_confusion_matrix = None
+        self.rf_confusion_matrix = None
+        self.nn_confusion_matrix = None
+        
+        # Store test data and predictions
+        self.X_test = None
+        self.y_test = None
+        self.svm_predictions = None
+        self.rf_predictions = None
+        self.nn_predictions = None
+        
         # Label encoder
         self.label_encoder = LabelEncoder()
         
@@ -45,6 +68,14 @@ class FaceRecognizer:
         
         # Feature extractor for additional features
         self.orb = cv2.ORB_create(nfeatures=500)
+        
+        # Try to load existing models on startup
+        if self._models_exist():
+            logger.info("Found existing models, loading...")
+            if self.load_models():
+                logger.info("Successfully loaded existing models")
+            else:
+                logger.warning("Failed to load existing models, will need to train new ones")
         
     def extract_face_features(self, image_path_or_array):
         """Extract face features from image using OpenCV"""
@@ -402,16 +433,46 @@ class FaceRecognizer:
             'Neural Network': self.nn_model
         }
         
+        # Store test data for confusion matrix generation
+        self.X_test = X_test
+        self.y_test = y_test
+        
         for name, model in models.items():
             y_pred = model.predict(X_test)
             accuracy = accuracy_score(y_test, y_pred)
             logger.info(f"{name} accuracy: {accuracy:.4f}")
+            
+            # Store predictions
+            if name == 'SVM':
+                self.svm_accuracy = accuracy
+                self.svm_predictions = y_pred
+                self.svm_confusion_matrix = confusion_matrix(y_test, y_pred)
+            elif name == 'Random Forest':
+                self.rf_accuracy = accuracy
+                self.rf_predictions = y_pred
+                self.rf_confusion_matrix = confusion_matrix(y_test, y_pred)
+            elif name == 'Neural Network':
+                self.nn_accuracy = accuracy
+                self.nn_predictions = y_pred
+                self.nn_confusion_matrix = confusion_matrix(y_test, y_pred)
             
             # Cross-validation (if enough samples)
             if len(X) >= 3:
                 try:
                     cv_scores = cross_val_score(model, X, y_encoded, cv=min(3, len(X)), scoring='accuracy')
                     logger.info(f"{name} cross-validation accuracy: {cv_scores.mean():.4f} (+/- {cv_scores.std() * 2:.4f})")
+                    
+                    # Store cross-validation metrics
+                    if name == 'SVM':
+                        self.svm_cv_accuracy = cv_scores.mean()
+                        self.svm_cv_std = cv_scores.std()
+                    elif name == 'Random Forest':
+                        self.rf_cv_accuracy = cv_scores.mean()
+                        self.rf_cv_std = cv_scores.std()
+                    elif name == 'Neural Network':
+                        self.nn_cv_accuracy = cv_scores.mean()
+                        self.nn_cv_std = cv_scores.std()
+                        
                 except Exception as e:
                     logger.warning(f"Cross-validation failed for {name}: {e}")
         
@@ -422,6 +483,38 @@ class FaceRecognizer:
         # Save models
         self.save_models()
         
+        return True
+    
+    def get_registered_users(self):
+        """Get list of registered users from face_data directory"""
+        face_data_dir = "face_data"
+        if not os.path.exists(face_data_dir):
+            return []
+        
+        users = []
+        for item in os.listdir(face_data_dir):
+            user_dir = os.path.join(face_data_dir, item)
+            if os.path.isdir(user_dir):
+                # Check if directory has any image files
+                image_files = [f for f in os.listdir(user_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+                if image_files:
+                    users.append(item)
+        
+        return users
+    
+    def _models_exist(self):
+        """Check if all required model files exist"""
+        required_files = [
+            'svm_model.pkl',
+            'rf_model.pkl',
+            'nn_model.pkl',
+            'label_encoder.pkl',
+            'known_encodings.pkl'
+        ]
+        
+        for filename in required_files:
+            if not os.path.exists(os.path.join(self.model_dir, filename)):
+                return False
         return True
     
     def save_models(self):

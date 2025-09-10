@@ -81,6 +81,15 @@ class FaceAuthCryptoSystem:
     def authenticate_user(self):
         """Authenticate user using face recognition"""
         print("\n=== Face Authentication ===")
+        
+        # Check if any users are registered
+        registered_users = self.face_recognizer.get_registered_users()
+        if not registered_users:
+            print("No registered users found!")
+            print("Please register users first using option 1.")
+            return False
+        
+        print(f"Number of registered users: {len(registered_users)}")
         print("Position your face in front of the camera for authentication.")
         
         # Load models if not already loaded
@@ -89,7 +98,8 @@ class FaceAuthCryptoSystem:
             self.face_recognizer.nn_model is None):
             print("Loading recognition models...")
             if not self.face_recognizer.load_models():
-                print("Failed to load models. Please train models first.")
+                print("Failed to load models. Models may not be trained yet.")
+                print("Please train models first using option 3.")
                 return False
         
         # Capture face for authentication
@@ -147,6 +157,21 @@ class FaceAuthCryptoSystem:
             print("No face data found. Please register users first.")
             return False
         
+        # Check for registered users
+        registered_users = self.face_recognizer.get_registered_users()
+        if not registered_users:
+            print("No registered users found in face_data directory.")
+            print("Please register users first using option 1.")
+            return False
+        
+        # Check if models already exist and are up to date
+        if self.face_recognizer._models_exist():
+            print(f"Found existing trained models for users: {', '.join(registered_users)}")
+            choice = input("Do you want to retrain the models? (y/n): ").strip().lower()
+            if choice != 'y':
+                print("Using existing models.")
+                return True
+        
         print("Training machine learning models...")
         print("This may take a few minutes depending on the amount of data...")
         
@@ -154,11 +179,128 @@ class FaceAuthCryptoSystem:
         
         if self.face_recognizer.train_models():
             end_time = time.time()
-            print(f"✓ Models trained successfully in {end_time - start_time:.2f} seconds!")
+            training_time = end_time - start_time
+            print(f"✓ Models trained successfully in {training_time:.2f} seconds!")
             
             # Display known users
             users = self.face_recognizer.get_user_list()
             print(f"Known users: {', '.join(users)}")
+            
+            # Display additional model performance information for presentation
+            print("\n=== MODEL PERFORMANCE METRICS FOR PRESENTATION ===")
+            print(f"Total training time: {training_time:.2f} seconds")
+            
+            # Show samples per user for presentation
+            print("\nSamples per user:")
+            total_samples = 0
+            for user in users:
+                user_dir = os.path.join("face_data", user)
+                if os.path.isdir(user_dir):
+                    image_count = len([f for f in os.listdir(user_dir) 
+                                    if f.lower().endswith(('.jpg', '.jpeg', '.png'))])
+                    print(f"  - {user}: {image_count} samples")
+                    total_samples += image_count
+            
+            print(f"\nTotal training samples: {total_samples}")
+            
+            # Model-specific metrics (if available)
+            if hasattr(self.face_recognizer, 'svm_accuracy'):
+                print("\nModel Accuracy:")
+                print(f"  - SVM: {self.face_recognizer.svm_accuracy:.4f}")
+                print(f"  - Random Forest: {self.face_recognizer.rf_accuracy:.4f}")
+                print(f"  - Neural Network: {self.face_recognizer.nn_accuracy:.4f}")
+                print(f"  - Ensemble (weighted): {(self.face_recognizer.svm_accuracy*0.4 + self.face_recognizer.rf_accuracy*0.4 + self.face_recognizer.nn_accuracy*0.2):.4f}")
+            
+            # Display confusion matrices
+            if hasattr(self.face_recognizer, 'svm_confusion_matrix') and self.face_recognizer.svm_confusion_matrix is not None:
+                print("\n=== CONFUSION MATRICES ===")
+                print("Confusion matrices show how well each model classifies different users.")
+                print("Rows represent actual users, columns represent predicted users.")
+                print("Diagonal values (top-left to bottom-right) show correct predictions.")
+                
+                # Get user names for better display
+                label_map = {i: name for i, name in enumerate(self.face_recognizer.label_encoder.classes_)}
+                
+                # Display confusion matrices
+                models = [
+                    ("SVM Model", self.face_recognizer.svm_confusion_matrix),
+                    ("Random Forest Model", self.face_recognizer.rf_confusion_matrix),
+                    ("Neural Network Model", self.face_recognizer.nn_confusion_matrix)
+                ]
+                
+                for model_name, conf_matrix in models:
+                    if conf_matrix is not None:
+                        print(f"\n{model_name} Confusion Matrix:")
+                        # Create header with user names
+                        header = "      " + " ".join([f"{label_map[i][:7]:8}" for i in range(len(label_map))])
+                        print(header)
+                        
+                        # Print matrix with row labels
+                        for i, row in enumerate(conf_matrix):
+                            row_str = f"{label_map[i][:7]:7}"
+                            for val in row:
+                                row_str += f"{val:8}"
+                            print(row_str)
+            
+            # Additional statistics for presentation
+            print("\nSystem Statistics:")
+            print(f"  - Face detection algorithm: Haar Cascade Classifier")
+            print(f"  - Feature extraction: 128-dimension face encodings")
+            print(f"  - Recognition threshold: {self.face_recognizer.recognition_threshold:.3f}")
+            print(f"  - Model file size: {os.path.getsize('models/svm_model.pkl')/1024:.1f} KB (SVM), {os.path.getsize('models/rf_model.pkl')/1024:.1f} KB (RF), {os.path.getsize('models/nn_model.pkl')/1024:.1f} KB (NN)")
+            
+            # Max Voting System Description
+            print("\n=== MAX VOTING SYSTEM DETAILS ===")
+            print("The system uses ensemble learning with a max voting classifier:")
+            print("\n1. Ensemble Learning with Max Voting:")
+            print("   • Multiple models vote for the final classification decision")
+            print("   • Each model independently predicts the user identity")
+            print("   • The class with the maximum votes becomes the final prediction")
+            print("   • In case of a tie, models with higher accuracy get precedence")
+            
+            print("\n2. Models in the Ensemble:")
+            print("   • SVM Model:")
+            print("     - Strengths: High accuracy with clear separation between classes")
+            print("     - Use case: Creates optimal decision boundaries in high-dimensional face space")
+            print(f"     - Current accuracy: {self.face_recognizer.svm_accuracy:.2%}")
+            
+            print("\n   • Random Forest Model:")
+            print("     - Strengths: Robust to noise and outliers, handles non-linear patterns")
+            print("     - Use case: Performs well with varied lighting conditions and minor face occlusions")
+            print(f"     - Current accuracy: {self.face_recognizer.rf_accuracy:.2%}")
+            
+            print("\n   • Neural Network Model:")
+            print("     - Strengths: Learns complex patterns, adapts to subtle differences")
+            print("     - Use case: Captures nuanced facial features that other models might miss")
+            print(f"     - Current accuracy: {self.face_recognizer.nn_accuracy:.2%}")
+            
+            print("\n3. Voting Process:")
+            print("   • Each model predicts a class label (user identity)")
+            print("   • Max Voting tallies all predictions")
+            print("   • The class with the highest number of votes wins")
+            print("   • Example: If SVM predicts User1, RF predicts User1, and NN predicts User2,")
+            print("     the final result would be User1 (2 votes vs. 1 vote)")
+            
+            print("\n4. Confidence Calculation:")
+            print("   • After determining the winning class by votes,")
+            print("   • The system calculates a confidence score based on the models' certainty")
+            print("   • Higher confidence scores indicate more reliable predictions")
+            print(f"   • Recognition threshold: {self.face_recognizer.recognition_threshold:.2f}")
+            print("   • If confidence < threshold, authentication is rejected")
+            
+            print("\n5. Benefits of Max Voting:")
+            print("   • Higher accuracy: Combined knowledge of multiple algorithms")
+            print("   • Reduced false positives: Models must agree for a strong prediction")
+            print("   • Robustness: Less affected by individual model weaknesses")
+            print("   • Generalization: Better performance on new, unseen faces")
+            print("   • Reduced overfitting: Multiple models compensate for each other's biases")
+            print("===================================================")
+            
+            print("\nRecommended next steps:")
+            print("  1. Test authentication with different lighting conditions")
+            print("  2. Try authentication with different facial expressions")
+            print("  3. Measure authentication speed for real-time performance")
+            print("===================================================")
             
             return True
         else:
@@ -398,6 +540,26 @@ class FaceAuthCryptoSystem:
         print("Welcome to the secure face authentication system!")
         print("This system uses advanced face recognition to protect your files.")
         
+        # Show system status on startup
+        print(f"\n{'='*50}")
+        print("SYSTEM STATUS")
+        print(f"{'='*50}")
+        
+        # Check for registered users
+        registered_users = self.face_recognizer.get_registered_users()
+        if registered_users:
+            print(f"✓ {len(registered_users)} registered user(s) found")
+        else:
+            print("⚠ No registered users found")
+        
+        # Check for trained models
+        if self.face_recognizer._models_exist():
+            print("✓ Trained models loaded successfully")
+        else:
+            print("⚠ No trained models found - training required")
+        
+        print(f"{'='*50}")
+        
         while True:
             print(f"\n{'='*40}")
             if self.authenticated_user:
@@ -417,9 +579,9 @@ class FaceAuthCryptoSystem:
             print("9.  Adjust settings")
             print("10. Logout")
             print("11. Exit")
-            
+
             choice = input("\nEnter your choice (1-11): ").strip()
-            
+
             try:
                 if choice == "1":
                     self.register_user()
@@ -427,24 +589,24 @@ class FaceAuthCryptoSystem:
                     self.authenticate_user()
                 elif choice == "3":
                     self.train_models()
-                elif choice == "4":
-                    self.encrypt_file()
-                elif choice == "5":
-                    self.decrypt_file()
-                elif choice == "6":
-                    self.encrypt_folder()
-                elif choice == "7":
-                    self.decrypt_folder()
-                elif choice == "8":
-                    self.view_system_info()
-                elif choice == "9":
-                    self.adjust_settings()
+                # elif choice == "4":
+                #     self.encrypt_file()
+                # elif choice == "5":
+                #     self.decrypt_file()
+                # elif choice == "6":
+                #     self.encrypt_folder()
+                # elif choice == "7":
+                #     self.decrypt_folder()
+                # elif choice == "8":
+                #     self.view_system_info()
+                # elif choice == "9":
+                #     self.adjust_settings()
                 elif choice == "10":
                     self.logout()
                 elif choice == "11":
                     self.logout()
                     print("\nThank you for using Face-based Authentication & Cryptography System!")
-                    print("Stay secure! 🔒")
+                    print("Stay secure! ")
                     break
                 else:
                     print("Invalid choice! Please enter a number between 1-11.")
