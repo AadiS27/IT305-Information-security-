@@ -56,15 +56,29 @@ class FaceCapture:
             logger.info("Camera stopped")
     
     def detect_faces(self, frame):
-        """Detect faces in a frame"""
+        """Detect faces in a frame with multiple parameter sets for robustness"""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = self.face_cascade.detectMultiScale(
-            gray,
-            scaleFactor=1.1,
-            minNeighbors=5,
-            minSize=(30, 30)
-        )
-        return faces
+        
+        # Try multiple detection parameters
+        detection_params = [
+            {'scaleFactor': 1.05, 'minNeighbors': 3, 'minSize': (20, 20)},  # More sensitive
+            {'scaleFactor': 1.1, 'minNeighbors': 5, 'minSize': (30, 30)},   # Default
+            {'scaleFactor': 1.2, 'minNeighbors': 3, 'minSize': (40, 40)},   # Less sensitive
+        ]
+        
+        for params in detection_params:
+            faces = self.face_cascade.detectMultiScale(gray, **params)
+            if len(faces) > 0:
+                return faces
+        
+        # If no faces found, try with histogram equalization
+        equalized = cv2.equalizeHist(gray)
+        for params in detection_params:
+            faces = self.face_cascade.detectMultiScale(equalized, **params)
+            if len(faces) > 0:
+                return faces
+        
+        return []
     
     def capture_face_samples(self, user_name, num_samples=20, save_dir="face_data"):
         """Capture multiple face samples for training"""

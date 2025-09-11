@@ -20,6 +20,24 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class FaceRecognizer:
+    def get_user_encoding(self, user_name, data_dir="face_data"):
+        """Return the average face encoding for a user (for face-authenticated encryption)."""
+        import numpy as np
+        user_dir = os.path.join(data_dir, user_name)
+        if not os.path.isdir(user_dir):
+            logger.error(f"User directory not found: {user_dir}")
+            return None
+        encodings = []
+        for image_file in os.listdir(user_dir):
+            image_path = os.path.join(user_dir, image_file)
+            encoding = self.extract_face_features(image_path)
+            if encoding is not None:
+                encodings.append(encoding)
+        if not encodings:
+            logger.error(f"No encodings found for user {user_name}")
+            return None
+        # Average the encodings for robustness
+        return np.mean(encodings, axis=0)
     def __init__(self, model_dir="models"):
         """Initialize face recognizer"""
         self.model_dir = model_dir
@@ -78,7 +96,7 @@ class FaceRecognizer:
                 logger.warning("Failed to load existing models, will need to train new ones")
         
     def extract_face_features(self, image_path_or_array):
-        """Extract face features from image using OpenCV"""
+        """Extract face features from image using OpenCV (always grayscale for consistency)"""
         try:
             if isinstance(image_path_or_array, str):
                 # Load image from path
@@ -90,18 +108,37 @@ class FaceRecognizer:
                 # Use provided array
                 image = image_path_or_array.copy()
             
-            # Convert to grayscale
-            if len(image.shape) == 3:
-                gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-            else:
-                gray = image
+            # Always convert to grayscale for encoding
+            gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
             
-            # Detect faces
-            faces = self.face_cascade.detectMultiScale(gray, scaleFactor=1.1, minNeighbors=5, minSize=(30, 30))
+            # Try multiple detection parameters for better results
+            detection_params = [
+                {'scaleFactor': 1.05, 'minNeighbors': 3, 'minSize': (20, 20)},  # More sensitive
+                {'scaleFactor': 1.1, 'minNeighbors': 5, 'minSize': (30, 30)},   # Default
+                {'scaleFactor': 1.2, 'minNeighbors': 3, 'minSize': (40, 40)},   # Less sensitive, larger faces
+                {'scaleFactor': 1.3, 'minNeighbors': 4, 'minSize': (25, 25)},   # Alternative params
+            ]
+            
+            faces = []
+            for params in detection_params:
+                faces = self.face_cascade.detectMultiScale(gray, **params)
+                if len(faces) > 0:
+                    logger.info(f"Face detected with parameters: {params}")
+                    break
             
             if len(faces) == 0:
-                logger.warning("No face found in image")
-                return None
+                logger.warning("No face found in image with any detection parameters")
+                # Try histogram equalization to improve contrast
+                equalized = cv2.equalizeHist(gray)
+                for params in detection_params:
+                    faces = self.face_cascade.detectMultiScale(equalized, **params)
+                    if len(faces) > 0:
+                        logger.info(f"Face detected after histogram equalization with parameters: {params}")
+                        gray = equalized
+                        break
+                
+                if len(faces) == 0:
+                    return None
             
             # Use the largest face
             largest_face = max(faces, key=lambda f: f[2] * f[3])

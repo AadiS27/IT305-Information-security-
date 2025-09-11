@@ -15,48 +15,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class CryptoManager:
-    def __init__(self, key_file="crypto.key"):
-        """Initialize crypto manager"""
-        self.key_file = key_file
+    def _derive_key_from_face_encoding(self, face_encoding):
+        """Derive a 32-byte AES key from a face encoding (numpy array) using SHA-256."""
+        import hashlib
+        if hasattr(face_encoding, 'tobytes'):
+            encoding_bytes = face_encoding.tobytes()
+        else:
+            encoding_bytes = bytes(face_encoding)
+        key = hashlib.sha256(encoding_bytes).digest()  # 32 bytes for AES-256
+        return base64.urlsafe_b64encode(key)
+    def __init__(self):
+        """Initialize crypto manager (no default key file)"""
         self.key = None
         self.fernet = None
-        
-        # Try to load existing key, create new one if doesn't exist
-        if os.path.exists(key_file):
-            self.load_key()
-        else:
-            self.generate_key()
     
-    def generate_key(self):
-        """Generate a new encryption key"""
-        try:
-            self.key = Fernet.generate_key()
-            self.fernet = Fernet(self.key)
-            
-            # Save key to file
-            with open(self.key_file, 'wb') as f:
-                f.write(self.key)
-            
-            logger.info("New encryption key generated and saved")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error generating key: {e}")
-            return False
-    
-    def load_key(self):
-        """Load encryption key from file"""
-        try:
-            with open(self.key_file, 'rb') as f:
-                self.key = f.read()
-            
-            self.fernet = Fernet(self.key)
-            logger.info("Encryption key loaded successfully")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Error loading key: {e}")
-            return False
+    # generate_key and load_key methods removed (no longer needed)
     
     def derive_key_from_password(self, password, salt=None):
         """Derive encryption key from password"""
@@ -109,8 +82,8 @@ class CryptoManager:
             logger.error(f"Error decrypting text: {e}")
             return None
     
-    def encrypt_file(self, input_file, output_file=None):
-        """Encrypt a file"""
+    def encrypt_file(self, input_file, output_file=None, delete_original=True):
+        """Encrypt a file and optionally delete the original"""
         try:
             if self.fernet is None:
                 logger.error("No encryption key available")
@@ -129,6 +102,14 @@ class CryptoManager:
             # Write encrypted file
             with open(output_file, 'wb') as f:
                 f.write(encrypted_data)
+            
+            # Delete original file if requested
+            if delete_original:
+                try:
+                    os.remove(input_file)
+                    logger.info(f"Original file deleted: {input_file}")
+                except Exception as e:
+                    logger.warning(f"Could not delete original file {input_file}: {e}")
             
             logger.info(f"File encrypted: {input_file} -> {output_file}")
             return True
@@ -196,8 +177,8 @@ class CryptoManager:
             logger.error(f"Error securely deleting file: {e}")
             return False
     
-    def create_encrypted_folder(self, folder_path):
-        """Create an encrypted folder structure"""
+    def create_encrypted_folder(self, folder_path, delete_original=True):
+        """Create an encrypted folder structure and optionally delete original"""
         try:
             encrypted_folder = folder_path + "_encrypted"
             os.makedirs(encrypted_folder, exist_ok=True)
@@ -214,10 +195,19 @@ class CryptoManager:
                     # Create directories if needed
                     os.makedirs(os.path.dirname(encrypted_file_path), exist_ok=True)
                     
-                    # Encrypt file
-                    if not self.encrypt_file(file_path, encrypted_file_path):
+                    # Encrypt file (without deleting yet - we'll delete the whole folder later)
+                    if not self.encrypt_file(file_path, encrypted_file_path, delete_original=False):
                         logger.error(f"Failed to encrypt {file_path}")
                         return False
+            
+            # Delete original folder if requested and encryption was successful
+            if delete_original:
+                try:
+                    import shutil
+                    shutil.rmtree(folder_path)
+                    logger.info(f"Original folder deleted: {folder_path}")
+                except Exception as e:
+                    logger.warning(f"Could not delete original folder {folder_path}: {e}")
             
             logger.info(f"Folder encrypted: {folder_path} -> {encrypted_folder}")
             return True
@@ -263,71 +253,103 @@ class CryptoManager:
             logger.error(f"Error decrypting folder: {e}")
             return False
     
-    def encrypt_with_face_auth(self, input_file, user_name, face_recognizer):
-        """Encrypt file with face authentication requirement"""
+    def encrypt_with_face_auth(self, input_file, user_name, face_recognizer, delete_original=True):
+        """Encrypt file with face authentication requirement (face-derived key) and optionally delete original"""
         try:
-            # Create metadata about the encryption
+            # Get face encoding for the user
+            face_encoding = face_recognizer.get_user_encoding(user_name)
+            if face_encoding is None:
+                logger.error(f"No face encoding found for user {user_name}")
+                return False
+            key = self._derive_key_from_face_encoding(face_encoding)
+            fernet = Fernet(key)
+            # Encrypt the file
+            with open(input_file, 'rb') as f:
+                file_data = f.read()
+            encrypted_data = fernet.encrypt(file_data)
+            encrypted_file = input_file + f".{user_name}.face_encrypted"
+            with open(encrypted_file, 'wb') as f:
+                f.write(encrypted_data)
+            # Store a hash of the face-derived key in face_keys/<username>.keyhash
+            import hashlib
+            key_hash = hashlib.sha256(key).digest()
+            import base64
+            key_hash_b64 = base64.urlsafe_b64encode(key_hash).decode('utf-8')
+            key_dir = os.path.join(os.path.dirname(__file__), '..', 'face_keys')
+            os.makedirs(key_dir, exist_ok=True)
+            key_file_path = os.path.join(key_dir, f"{user_name}.keyhash")
+            with open(key_file_path, 'w') as f:
+                f.write(key_hash_b64)
+            # Create metadata
             metadata = {
                 'encrypted_by': user_name,
                 'encryption_method': 'face_auth',
                 'original_filename': os.path.basename(input_file)
             }
-            
-            # Encrypt the file
-            encrypted_file = input_file + f".{user_name}.face_encrypted"
-            if not self.encrypt_file(input_file, encrypted_file):
-                return False
-            
-            # Store metadata
             metadata_file = encrypted_file + ".meta"
             metadata_text = "\n".join([f"{k}: {v}" for k, v in metadata.items()])
-            
             with open(metadata_file, 'w') as f:
                 f.write(metadata_text)
             
-            logger.info(f"File encrypted with face authentication: {encrypted_file}")
-            return True
+            # Delete original file if requested
+            if delete_original:
+                try:
+                    os.remove(input_file)
+                    logger.info(f"Original file deleted: {input_file}")
+                except Exception as e:
+                    logger.warning(f"Could not delete original file {input_file}: {e}")
             
+            logger.info(f"File encrypted with face authentication: {encrypted_file}")
+            logger.info(f"Face key hash stored at: {key_file_path}")
+            return True
         except Exception as e:
             logger.error(f"Error encrypting with face auth: {e}")
             return False
     
-    def decrypt_with_face_auth(self, encrypted_file, authenticated_user):
-        """Decrypt file with face authentication verification"""
+    def decrypt_with_face_auth(self, encrypted_file, authenticated_user, face_recognizer, face_encoding=None):
+        """Decrypt file with face authentication verification (face-derived key, supports live encoding)"""
         try:
             # Check metadata
             metadata_file = encrypted_file + ".meta"
             if not os.path.exists(metadata_file):
                 logger.error("Metadata file not found")
                 return False
-            
             with open(metadata_file, 'r') as f:
                 metadata_content = f.read()
-            
             # Parse metadata
             metadata = {}
             for line in metadata_content.strip().split('\n'):
                 if ':' in line:
                     key, value = line.split(':', 1)
                     metadata[key.strip()] = value.strip()
-            
             # Verify user authorization
             if 'encrypted_by' in metadata:
                 authorized_user = metadata['encrypted_by']
                 if authenticated_user != authorized_user:
                     logger.error(f"User {authenticated_user} not authorized to decrypt file encrypted by {authorized_user}")
                     return False
-            
+            # Use provided live encoding if available, else fallback to stored encoding
+            if face_encoding is None:
+                face_encoding = face_recognizer.get_user_encoding(authenticated_user)
+            if face_encoding is None:
+                logger.error(f"No face encoding found for user {authenticated_user}")
+                return False
+            key = self._derive_key_from_face_encoding(face_encoding)
+            fernet = Fernet(key)
             # Decrypt the file
             original_name = metadata.get('original_filename', 'decrypted_file')
             output_file = os.path.join(os.path.dirname(encrypted_file), original_name)
-            
-            if self.decrypt_file(encrypted_file, output_file):
-                logger.info(f"File decrypted with face authentication: {output_file}")
-                return True
-            else:
+            with open(encrypted_file, 'rb') as f:
+                encrypted_data = f.read()
+            try:
+                decrypted_data = fernet.decrypt(encrypted_data)
+            except Exception as e:
+                logger.error(f"Decryption failed: {e}")
                 return False
-                
+            with open(output_file, 'wb') as f:
+                f.write(decrypted_data)
+            logger.info(f"File decrypted with face authentication: {output_file}")
+            return True
         except Exception as e:
             logger.error(f"Error decrypting with face auth: {e}")
             return False
