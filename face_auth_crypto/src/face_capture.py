@@ -81,7 +81,7 @@ class FaceCapture:
         return []
     
     def capture_face_samples(self, user_name, num_samples=20, save_dir="face_data"):
-        """Capture multiple face samples for training"""
+        """Capture multiple face samples for training - AUTO CAPTURE"""
         if not self.start_camera():
             return False
             
@@ -90,9 +90,12 @@ class FaceCapture:
         os.makedirs(user_dir, exist_ok=True)
         
         captured_samples = 0
+        last_capture_time = 0
+        auto_capture_delay = 0.8  # Seconds between auto captures
         
         print(f"Capturing {num_samples} face samples for {user_name}")
-        print("Position your face in front of the camera. Press 'c' to capture, 'q' to quit")
+        print("Position your face in front of the camera. Auto-capture enabled!")
+        print("Press 'q' to quit early")
         
         while captured_samples < num_samples:
             ret, frame = self.camera.read()
@@ -112,14 +115,14 @@ class FaceCapture:
             # Display progress
             cv2.putText(display_frame, f"Captured: {captured_samples}/{num_samples}", 
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.putText(display_frame, "Press 'c' to capture, 'q' to quit", 
+            cv2.putText(display_frame, "AUTO-CAPTURE MODE - Press 'q' to quit", 
                        (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
             
             cv2.imshow('Face Capture', display_frame)
             
-            key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord('c') and len(faces) > 0:
+            # Auto-capture when face is detected and enough time has passed
+            current_time = time.time()
+            if len(faces) > 0 and (current_time - last_capture_time) >= auto_capture_delay:
                 # Capture the largest face
                 largest_face = max(faces, key=lambda face: face[2] * face[3])
                 x, y, w, h = largest_face
@@ -134,11 +137,12 @@ class FaceCapture:
                 
                 cv2.imwrite(filepath, face_resized)
                 captured_samples += 1
+                last_capture_time = current_time
                 
-                print(f"Captured sample {captured_samples}/{num_samples}")
-                time.sleep(0.5)  # Brief pause to avoid double captures
-                
-            elif key == ord('q'):
+                print(f"Auto-captured sample {captured_samples}/{num_samples}")
+            
+            key = cv2.waitKey(1) & 0xFF
+            if key == ord('q'):
                 break
         
         self.stop_camera()
@@ -151,12 +155,18 @@ class FaceCapture:
             return False
     
     def capture_single_face(self, timeout=10):
-        """Capture a single face for authentication"""
+        """Capture a single face for authentication - AUTO CAPTURE after face is stable"""
         if not self.start_camera():
             return None
             
         print("Position your face in front of the camera for authentication")
+        print("Auto-capture enabled - hold still when face is detected!")
+        
         start_time = time.time()
+        face_stable_time = None
+        stability_required = 1.5  # Seconds of stable face detection before auto-capture
+        last_face_position = None
+        position_threshold = 30  # pixels - how much the face can move
         
         while time.time() - start_time < timeout:
             ret, frame = self.camera.read()
@@ -168,34 +178,61 @@ class FaceCapture:
             
             # Draw rectangles around faces
             display_frame = frame.copy()
-            for (x, y, w, h) in faces:
+            current_time = time.time()
+            
+            if len(faces) > 0:
+                # Get the largest face
+                largest_face = max(faces, key=lambda face: face[2] * face[3])
+                x, y, w, h = largest_face
+                
                 cv2.rectangle(display_frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
-                cv2.putText(display_frame, "Face detected - Hold still", 
-                           (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                
+                # Check if face position is stable
+                if last_face_position is None:
+                    last_face_position = (x, y, w, h)
+                    face_stable_time = current_time
+                    cv2.putText(display_frame, "Hold still...", 
+                               (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                else:
+                    lx, ly, lw, lh = last_face_position
+                    # Check if face moved significantly
+                    if abs(x - lx) < position_threshold and abs(y - ly) < position_threshold:
+                        # Face is stable
+                        time_stable = current_time - face_stable_time
+                        if time_stable >= stability_required:
+                            # Auto-capture!
+                            face_roi = frame[y:y+h, x:x+w]
+                            face_resized = cv2.resize(face_roi, (160, 160))
+                            
+                            self.stop_camera()
+                            print("✓ Face captured successfully!")
+                            return face_resized
+                        else:
+                            # Show countdown
+                            remaining = int(stability_required - time_stable) + 1
+                            cv2.putText(display_frame, f"Capturing in {remaining}...", 
+                                       (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
+                    else:
+                        # Face moved, reset timer
+                        last_face_position = (x, y, w, h)
+                        face_stable_time = current_time
+                        cv2.putText(display_frame, "Hold still...", 
+                                   (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            else:
+                # No face detected, reset
+                last_face_position = None
+                face_stable_time = None
             
             remaining_time = int(timeout - (time.time() - start_time))
             cv2.putText(display_frame, f"Time remaining: {remaining_time}s", 
                        (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
-            cv2.putText(display_frame, "Press SPACE when ready", 
-                       (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+            cv2.putText(display_frame, "AUTO-CAPTURE - Hold still | Press 'q' to cancel", 
+                       (10, 70), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
             
             cv2.imshow('Face Authentication', display_frame)
             
             key = cv2.waitKey(1) & 0xFF
-            
-            if key == ord(' ') and len(faces) > 0:
-                # Capture the largest face
-                largest_face = max(faces, key=lambda face: face[2] * face[3])
-                x, y, w, h = largest_face
-                
-                # Extract face
-                face_roi = frame[y:y+h, x:x+w]
-                face_resized = cv2.resize(face_roi, (160, 160))
-                
-                self.stop_camera()
-                return face_resized
-                
-            elif key == ord('q'):
+            if key == ord('q'):
                 break
         
         self.stop_camera()

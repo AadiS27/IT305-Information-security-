@@ -757,14 +757,14 @@ class FaceAuthCryptoSystem:
             print("3.  Train recognition models")
             print("4.  Encrypt file")
             print("5.  Decrypt file")
-            # print("6.  Encrypt folder")
-            # print("7.  Decrypt folder")
-            # print("8.  View system information")
-            # print("9.  Adjust settings")
-            print("6. Logout")
-            print("7. Exit")
+            print("6.  Encrypt folder")
+            print("7.  Decrypt folder")
+            print("8.  View system information")
+            print("9.  Adjust settings")
+            print("10. Logout")
+            print("11. Exit")
 
-            choice = input("\nEnter your choice (1-7): ").strip()
+            choice = input("\nEnter your choice (1-11): ").strip()
 
             try:
                 if choice == "1":
@@ -777,17 +777,17 @@ class FaceAuthCryptoSystem:
                     self.encrypt_file()
                 elif choice == "5":
                     self.decrypt_file()
-                # elif choice == "6":
-                #     self.encrypt_folder()
-                # elif choice == "7":
-                #     self.decrypt_folder()
-                # elif choice == "8":
-                #     self.view_system_info()
-                # elif choice == "9":
-                #     self.adjust_settings()
                 elif choice == "6":
-                    self.logout()
+                    self.encrypt_folder()
                 elif choice == "7":
+                    self.decrypt_folder()
+                elif choice == "8":
+                    self.view_system_info()
+                elif choice == "9":
+                    self.adjust_settings()
+                elif choice == "10":
+                    self.logout()
+                elif choice == "11":
                     self.logout()
                     print("\nThank you for using Face-based Authentication & Cryptography System!")
                     print("Stay secure! ")
