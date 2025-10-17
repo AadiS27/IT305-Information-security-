@@ -3,4 +3,4 @@ numpy<2.0
 pillow>=8.0.0
 scikit-learn>=1.0.0
 cryptography>=3.0.0
-dlib==19.24.2
+PyQt5>=5.15.0

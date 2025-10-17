@@ -78,8 +78,8 @@ class FaceRecognizer:
         # Label encoder
         self.label_encoder = LabelEncoder()
         
-        # Recognition threshold
-        self.recognition_threshold = 0.6
+        # Recognition threshold (lowered for better recognition rate)
+        self.recognition_threshold = 0.45  # 45% - more lenient for real-world use
         
         # OpenCV face detector
         self.face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
@@ -424,6 +424,16 @@ class FaceRecognizer:
             logger.error("Need at least 2 different users for training")
             return False
         
+        # Check if each user has at least 2 samples for stratified split
+        from collections import Counter
+        sample_counts = Counter(names)
+        users_with_insufficient_samples = [user for user, count in sample_counts.items() if count < 2]
+        
+        if users_with_insufficient_samples:
+            logger.error(f"Users with insufficient samples (need at least 2 each): {users_with_insufficient_samples}")
+            logger.error(f"Sample counts: {dict(sample_counts)}")
+            return False
+        
         # Convert to numpy arrays
         X = np.array(encodings)
         y = np.array(names)
@@ -432,15 +442,27 @@ class FaceRecognizer:
         y_encoded = self.label_encoder.fit_transform(y)
         
         logger.info(f"Training with {len(X)} samples from {len(set(names))} users")
+        logger.info(f"Sample distribution: {dict(sample_counts)}")
         
-        # Split data for evaluation
-        if len(X) >= 4:  # Need at least 4 samples for train/test split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
-            )
-        else:
-            X_train, X_test, y_train, y_test = X, X, y_encoded, y_encoded
-            logger.warning("Using same data for training and testing due to small dataset")
+        # Split data for evaluation - use stratify only if each class has at least 2 samples
+        try:
+            if len(X) >= 4:  # Need at least 4 samples total for train/test split
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y_encoded, test_size=0.2, random_state=42, stratify=y_encoded
+                )
+            else:
+                X_train, X_test, y_train, y_test = X, X, y_encoded, y_encoded
+                logger.warning("Using same data for training and testing due to small dataset")
+        except ValueError as e:
+            # If stratification fails, try without it
+            logger.warning(f"Stratified split failed: {e}")
+            logger.warning("Attempting split without stratification...")
+            if len(X) >= 4:
+                X_train, X_test, y_train, y_test = train_test_split(
+                    X, y_encoded, test_size=0.2, random_state=42
+                )
+            else:
+                X_train, X_test, y_train, y_test = X, X, y_encoded, y_encoded
         
         # Train SVM
         logger.info("Training SVM model...")
@@ -704,35 +726,48 @@ class FaceRecognizer:
         if not results:
             return None, 0.0
         
-        # Ensemble voting - majority vote with confidence weighting
+        # Ensemble voting - improved weighted voting
         name_votes = {}
         total_confidence = 0
         
         for name, confidence, method in results:
             if name not in name_votes:
-                name_votes[name] = {'count': 0, 'total_confidence': 0, 'methods': []}
+                name_votes[name] = {'count': 0, 'total_confidence': 0, 'methods': [], 'confidences': []}
             
             name_votes[name]['count'] += 1
             name_votes[name]['total_confidence'] += confidence
             name_votes[name]['methods'].append(method)
+            name_votes[name]['confidences'].append(confidence)
             total_confidence += confidence
         
-        # Find best candidate
+        # Find best candidate with improved scoring
         best_name = None
         best_score = 0
+        best_confidence = 0
         
         for name, data in name_votes.items():
-            # Score based on vote count and average confidence
+            # Improved scoring: weighted by vote count, average confidence, and max confidence
             avg_confidence = data['total_confidence'] / data['count']
+            max_confidence = max(data['confidences'])
             vote_ratio = data['count'] / len(results)
-            score = avg_confidence * vote_ratio
+            
+            # Give more weight to max confidence (best prediction) and vote count
+            score = (avg_confidence * 0.5 + max_confidence * 0.5) * (0.7 + 0.3 * vote_ratio)
             
             if score > best_score:
                 best_score = score
                 best_name = name
+                best_confidence = score
         
-        # Calculate overall confidence
-        overall_confidence = best_score if best_name else 0.0
+        # Calculate overall confidence (use the improved score)
+        overall_confidence = best_confidence if best_name else 0.0
+        
+        # Log voting details for debugging
+        if best_name:
+            votes_info = name_votes[best_name]
+            logger.info(f"Ensemble result: {best_name} with {votes_info['count']}/{len(results)} votes")
+            logger.info(f"Methods agreed: {', '.join(votes_info['methods'])}")
+            logger.info(f"Confidences: {[f'{c:.2f}' for c in votes_info['confidences']]}")
         
         if overall_confidence >= self.recognition_threshold:
             return best_name, overall_confidence

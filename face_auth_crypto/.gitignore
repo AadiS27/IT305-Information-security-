@@ -45,6 +45,13 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# Jupyter Notebook
+.ipynb_checkpoints
+*.ipynb
+
+# pyenv
+.python-version
+
 # Virtual environments
 .env
 .venv
@@ -53,6 +60,7 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+.virtualenv
 
 # IDEs
 .vscode/
@@ -60,6 +68,11 @@ venv.bak/
 *.swp
 *.swo
 *~
+.project
+.pydevproject
+.settings/
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
@@ -69,11 +82,17 @@ venv.bak/
 .Trashes
 ehthumbs.db
 Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
 
 # Project specific
 # Crypto keys (IMPORTANT: Don't commit these!)
 crypto.key
 *.key
+
+# Face keys directory (contains user encryption keys - SENSITIVE!)
+face_key/
+!face_key/.gitkeep
 
 # Face data (personal/biometric data - don't commit)
 face_data/
@@ -86,16 +105,31 @@ models/
 # Encrypted files
 encrypted_files/
 !encrypted_files/.gitkeep
+test_encrypted/
 
 # Logs
 *.log
 logs/
+face_auth_crypto.log
+face_auth_gui.log
 
 # Temporary files
 temp/
 tmp/
 *.tmp
 *.temp
+temp_auth.jpg
+temp_*.jpg
+
+# Backup files
+backup/
+*.bak
+*.backup
+*.old
+
+# Test files (if you have test data)
+test/
+*.test
 
 # Media files
 *.jpg
@@ -120,6 +154,10 @@ secrets.json
 *.bak
 *.backup
 *.old
+
+# Documentation folder (internal docs, not for GitHub)
+docs/
+!docs/.gitkeep
 
 # Windows specific
 desktop.ini

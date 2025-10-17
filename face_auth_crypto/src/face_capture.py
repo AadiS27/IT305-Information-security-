@@ -32,14 +32,22 @@ class FaceCapture:
         self.frame_height = 480
         
     def start_camera(self):
-        """Start the camera"""
+        """Start the camera with optimized settings"""
         try:
-            self.camera = cv2.VideoCapture(0)
+            self.camera = cv2.VideoCapture(0, cv2.CAP_DSHOW)  # DirectShow backend for faster startup on Windows
+            
+            # Set properties for faster initialization
             self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.frame_width)
             self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.frame_height)
+            self.camera.set(cv2.CAP_PROP_FPS, 30)  # Set FPS
+            self.camera.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Minimize buffer for lower latency
             
             if not self.camera.isOpened():
                 raise Exception("Could not open camera")
+            
+            # Warm up camera (capture and discard a few frames)
+            for _ in range(5):
+                self.camera.read()
                 
             logger.info("Camera started successfully")
             return True
@@ -56,29 +64,32 @@ class FaceCapture:
             logger.info("Camera stopped")
     
     def detect_faces(self, frame):
-        """Detect faces in a frame with multiple parameter sets for robustness"""
+        """Detect faces in a frame - optimized for speed"""
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         
-        # Try multiple detection parameters
-        detection_params = [
-            {'scaleFactor': 1.05, 'minNeighbors': 3, 'minSize': (20, 20)},  # More sensitive
-            {'scaleFactor': 1.1, 'minNeighbors': 5, 'minSize': (30, 30)},   # Default
-            {'scaleFactor': 1.2, 'minNeighbors': 3, 'minSize': (40, 40)},   # Less sensitive
-        ]
+        # Use single optimized parameter set for speed
+        faces = self.face_cascade.detectMultiScale(
+            gray, 
+            scaleFactor=1.1, 
+            minNeighbors=4,  # Balanced sensitivity
+            minSize=(30, 30),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
         
-        for params in detection_params:
-            faces = self.face_cascade.detectMultiScale(gray, **params)
-            if len(faces) > 0:
-                return faces
+        if len(faces) > 0:
+            return faces
         
-        # If no faces found, try with histogram equalization
+        # Fallback: Try with histogram equalization only if no faces found
         equalized = cv2.equalizeHist(gray)
-        for params in detection_params:
-            faces = self.face_cascade.detectMultiScale(equalized, **params)
-            if len(faces) > 0:
-                return faces
+        faces = self.face_cascade.detectMultiScale(
+            equalized,
+            scaleFactor=1.1,
+            minNeighbors=4,
+            minSize=(30, 30),
+            flags=cv2.CASCADE_SCALE_IMAGE
+        )
         
-        return []
+        return faces
     
     def capture_face_samples(self, user_name, num_samples=20, save_dir="face_data"):
         """Capture multiple face samples for training - AUTO CAPTURE"""
@@ -147,12 +158,12 @@ class FaceCapture:
         
         self.stop_camera()
         
-        if captured_samples == num_samples:
+        if captured_samples >= 2:  # Minimum 2 samples needed
             print(f"Successfully captured {captured_samples} samples for {user_name}")
-            return True
+            return captured_samples
         else:
-            print(f"Captured only {captured_samples}/{num_samples} samples")
-            return False
+            print(f"Captured only {captured_samples} samples - need at least 2")
+            return 0
     
     def capture_single_face(self, timeout=10):
         """Capture a single face for authentication - AUTO CAPTURE after face is stable"""
